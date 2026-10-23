@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TXMD5 — Lite Sessions</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,sans-serif;background:#0b0e13;color:#e6e6e6;
+       margin:0;padding:16px;max-width:900px;margin:auto;line-height:1.5}
+  h1{font-size:18px;margin:8px 0}
+  h2{font-size:14px;margin:18px 0 8px;opacity:.85;letter-spacing:.3px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  button{background:#2563eb;color:#fff;border:0;padding:8px 14px;border-radius:8px;
+         cursor:pointer;font-size:13px;font-weight:600}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.ghost{background:#1e2330}
+  button.warn{background:#b45309}
+  #status{font-size:13px;opacity:.8}
+  .card{background:#151922;border:1px solid #232938;border-radius:10px;padding:12px;margin:8px 0}
+  .row{display:flex;justify-content:space-between;gap:8px;padding:5px 0;
+       border-bottom:1px dashed #232938;align-items:center}
+  .row:last-child{border:0}
+  .tai{color:#4ade80;font-weight:700}
+  .xiu{color:#f87171;font-weight:700}
+  .err{color:#fca5a5}.ok{color:#4ade80}.warn-txt{color:#fbbf24}
+  pre{background:#0f131a;border:1px solid #232938;border-radius:8px;padding:10px;
+      overflow:auto;font-size:12px;max-height:400px;white-space:pre-wrap;word-break:break-all}
+  details{margin-top:12px}
+  summary{cursor:pointer;opacity:.8;font-size:13px;margin-bottom:6px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .stat{background:#151922;border:1px solid #232938;border-radius:10px;padding:12px;text-align:center}
+  .stat .v{font-size:22px;font-weight:700;margin-top:4px}
+  .stat .k{font-size:12px;opacity:.7}
+  .note{font-size:12px;color:#fbbf24;background:#2a1f08;border:1px solid #4a3610;
+        padding:8px 10px;border-radius:8px;margin:8px 0}
+  .banner{background:#7f1d1d;color:#fecaca;border:1px solid #991b1b;padding:8px 10px;
+          border-radius:8px;margin:8px 0;font-size:13px;display:none}
+  .dice{display:inline-block;background:#2563eb;color:#fff;border-radius:6px;
+        padding:2px 8px;margin-right:4px;font-weight:700;min-width:24px;text-align:center}
+  .phien-badge{background:#1e293b;color:#93c5fd;padding:2px 8px;border-radius:6px;font-size:12px}
+</style>
+</head>
+<body>
+
+<h1>🎲 TXMD5 — Lite Sessions</h1>
+
+<div id="corsBanner" class="banner">
+  ⚠️ <b>API bị CORS chặn</b> — đang hiển thị <b>DỮ LIỆU DEMO</b>.
+  Để lấy dữ liệu thật: dùng Cloudflare Worker proxy (xem README).
+</div>
+
+<div class="bar">
+  <button id="btnLoad">🔄 Tải lại</button>
+  <button id="btnAuto" class="ghost">▶ Auto 10s</button>
+  <button id="btnDemo" class="warn">🧪 Demo</button>
+  <span id="status">Chưa tải</span>
+</div>
+
+<div class="note">
+  ⚠️ Thống kê <b>lịch sử</b> từ JSON — <b>không phải dự đoán</b>. Game RNG không dự đoán được.
+</div>
+
+<h2>📊 THỐNG KÊ TỔNG QUAN</h2>
+<div class="grid" id="stats"></div>
+
+<h2>🔗 CHUỖI & CẦU</h2>
+<div id="streak"></div>
+
+<h2>📋 DANH SÁCH PHIÊN</h2>
+<div id="list"></div>
+
+<details>
+  <summary>🔍 Raw JSON (debug)</summary>
+  <pre id="raw">—</pre>
+</details>
+
+<script>
+/* ============================================================
+   CẤU HÌNH
+   ============================================================ */
+const CONFIG = {
+  // Nếu repo PUBLIC → token trong file bị lộ. Dùng Worker proxy (README).
+  API_URL: 'https://wtxmd52.tele68.com/v1/txmd5/lite-sessions?cp=R&cl=R&pf=web&at=ab36a88e2c9868ae0e8bc61adbd18dc',
+  AUTO_MS: 10000,
+  MAX_ITEMS: 100
+};
+
+/* ---- DEMO DATA (fallback khi CORS fail) ---- */
+const DEMO = {
+  phien: 71112806,
+  data: [
+    {id:71112806, ket_qua:"TAI", dices:[2,6,6], point:14},
+    {id:71112805, ket_qua:"XIU", dices:[1,4,3], point:8},
+    {id:71112804, ket_qua:"TAI", dices:[4,5,6], point:15},
+    {id:71112803, ket_qua:"TAI", dices:[3,3,6], point:12},
+    {id:71112802, ket_qua:"XIU", dices:[2,2,3], point:7},
+    {id:71112801, ket_qua:"XIU", dices:[1,1,4], point:6},
+    {id:71112800, ket_qua:"TAI", dices:[5,6,6], point:17},
+    {id:71112799, ket_qua:"XIU", dices:[3,2,4], point:9}
+  ],
+  thong_ke: {XIU: 9, TAI: 6}
+};
+
+/* DOM */
+const $status = document.getElementById('status'),
+      $list   = document.getElementById('list'),
+      $stats  = document.getElementById('stats'),
+      $streak = document.getElementById('streak'),
+      $raw    = document.getElementById('raw'),
+      $banner = document.getElementById('corsBanner'),
+      btnLoad = document.getElementById('btnLoad'),
+      btnAuto = document.getElementById('btnAuto'),
+      btnDemo = document.getElementById('btnDemo');
+let autoTimer=null, loading=false;
+
+/* ============================================================
+   LOAD
+   ============================================================ */
+async function load(){
+  if(loading) return;
+  loading=true; btnLoad.disabled=true;
+  $status.textContent='⏳ Đang tải...';
+  $banner.style.display='none';
+
+  try{
+    const res = await fetch(CONFIG.API_URL, {
+      method:'GET',
+      headers:{'Accept':'application/json'},
+      credentials:'omit',
+      cache:'no-store'
+    });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+
+    const text = await res.text();
+    $raw.textContent = text;
+
+    let json;
+    try { json = JSON.parse(text); }
+    catch { throw new Error('Response không phải JSON'); }
+
+    render(json, false);
+    $status.innerHTML = '<span class="ok">✅ OK</span> · phiên #'+
+      (json.phien ?? '-')+' · '+(json.data?.length ?? 0)+
+      ' bản ghi · '+new Date().toLocaleTimeString();
+
+  }catch(e){
+    console.warn('[load] failed:', e);
+    $banner.style.display='block';
+    $raw.textContent = '❌ Lỗi: ' + e.message;
+    render(DEMO, true);
+    $status.innerHTML = '<span class="warn-txt">⚠️ Demo (API lỗi: '+e.message+')</span>';
+  }finally{
+    loading=false; btnLoad.disabled=false;
+  }
+}
+
+/* ============================================================
+   RENDER TỔNG
+   ============================================================ */
+function render(json, isDemo){
+  const items = Array.isArray(json.data) ? json.data : [];
+  const norm  = items.map(normalize);
+  renderStats(norm, json.thong_ke, json.phien, isDemo);
+  renderStreak(norm);
+  renderList(norm);
+}
+
+/* ============================================================
+   NORMALIZE
+   ============================================================ */
+function normalize(it){
+  const id     = it.id ?? null;
+  const ketQua = String(it.ket_qua ?? it.ketQua ?? it.result ?? '').toUpperCase();
+  const dices  = Array.isArray(it.dices) ? it.dices : null;
+  const point  = it.point ?? it.tong ?? null;
+
+  let side=null;
+  if(ketQua.includes('TAI')||ketQua.includes('TÀI')||ketQua==='BIG') side='tai';
+  else if(ketQua.includes('XIU')||ketQua.includes('XỈU')||ketQua==='SMALL') side='xiu';
+  else if(point!=null) side = Number(point)>=11 ? 'tai' : 'xiu';
+
+  return { id, side, point, dices, ketQua };
+}
+
+/* ============================================================
+   THỐNG KÊ
+   ============================================================ */
+function renderStats(items, thongKe, currentPhien, isDemo){
+  const total = items.length;
+  let tai, xiu;
+  if(thongKe && (thongKe.TAI!=null || thongKe.XIU!=null)){
+    tai=Number(thongKe.TAI||0); xiu=Number(thongKe.XIU||0);
+  }else{
+    tai=items.filter(x=>x.side==='tai').length;
+    xiu=items.filter(x=>x.side==='xiu').length;
+  }
+  const sumTx = tai+xiu;
+  const pTai = sumTx?(tai/sumTx*100).toFixed(1):'0';
+  const pXiu = sumTx?(xiu/sumTx*100).toFixed(1):'0';
+
+  const points = items.map(x=>x.point).filter(v=>v!=null && !isNaN(v));
+  const avg = points.length ? (points.reduce((a,b)=>a+b,0)/points.length).toFixed(2) : '-';
+
+  const freq={}; points.forEach(p=>freq[p]=(freq[p]||0)+1);
+  const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,3)
+    .map(([k,v])=>`${k} (${v}×)`).join(', ')||'-';
+
+  $stats.innerHTML=`
+    <div class="stat"><div class="k">Phiên hiện tại${isDemo?' (demo)':''}</div>
+      <div class="v">#${currentPhien ?? '-'}</div></div>
+    <div class="stat"><div class="k">Điểm TB (${total})</div>
+      <div class="v">${avg}</div></div>
+    <div class="stat"><div class="k">TÀI</div>
+      <div class="v tai">${tai} · ${pTai}%</div></div>
+    <div class="stat"><div class="k">XỈU</div>
+      <div class="v xiu">${xiu} · ${pXiu}%</div></div>
+    <div class="stat" style="grid-column:1/-1"><div class="k">Điểm xuất hiện nhiều</div>
+      <div class="v" style="font-size:15px">${top}</div></div>
+  `;
+}
+
+/* ============================================================
+   CHUỖI / CẦU
+   ============================================================ */
+function renderStreak(items){
+  const seq = items.map(x=>x.side).filter(Boolean);
+  if(!seq.length){ $streak.innerHTML='<div class="card">Không đủ dữ liệu</div>'; return; }
+
+  let cur=seq[0], len=0;
+  for(const s of seq){ if(s===cur) len++; else break; }
+
+  const runs=[]; let prev=seq[0], n=1;
+  for(let i=1;i<seq.length;i++){
+    if(seq[i]===prev) n++;
+    else { runs.push({side:prev,len:n}); prev=seq[i]; n=1; }
+  }
+  runs.push({side:prev,len:n});
+  const maxRun = runs.reduce((a,b)=> b.len>a.len ? b : a, runs[0]);
+
+  const last5  = seq.slice(0,5).map(s=>s==='tai'?'T':'X').join(' ');
+  const last10 = seq.slice(0,10).map(s=>s==='tai'?'T':'X').join(' ');
+
+  const a10=seq.slice(0,10); let c11=0, c22=0;
+  for(let i=0;i<a10.length-1;i++){
+    if(a10[i]!==a10[i+1]) c11++;
+    if(i<a10.length-2 && a10[i]===a10[i+1] && a10[i+1]!==a10[i+2]) c22++;
+  }
+
+  $streak.innerHTML=`
+    <div class="card">
+      <div class="row"><span>Chuỗi hiện tại</span>
+        <span class="${cur}">${cur==='tai'?'TÀI':'XỈU'} × ${len}</span></div>
+      <div class="row"><span>Chuỗi dài nhất</span>
+        <span class="${maxRun.side}">${maxRun.side==='tai'?'TÀI':'XỈU'} × ${maxRun.len}</span></div>
+      <div class="row"><span>5 phiên gần nhất</span><b>${last5}</b></div>
+      <div class="row"><span>10 phiên gần nhất</span><b>${last10}</b></div>
+      <div class="row"><span>Cầu 1-1</span><b>${c11} lần đổi</b></div>
+      <div class="row"><span>Cầu 2-2</span><b>${c22} lần gãy</b></div>
+    </div>
+  `;
+}
+
+/* ============================================================
+   DANH SÁCH
+   ============================================================ */
+function renderList(items){
+  if(!items.length){ $list.innerHTML='<div class="card">Không có dữ liệu</div>'; return; }
+  $list.innerHTML = items.slice(0, CONFIG.MAX_ITEMS).map((it, idx)=>{
+    const diceHtml = Array.isArray(it.dices)
+      ? it.dices.map(d=>`<span class="dice">${esc(d)}</span>`).join('')
+      : '-';
+    const label = it.side==='tai' ? 'TÀI' : it.side==='xiu' ? 'XỈU' : (it.ketQua || '-');
+    return `<div class="card">
+      <div class="row">
+        <span>#${idx+1} <span class="phien-badge">Phiên ${esc(it.id ?? '-')}</span></span>
+        <span class="${it.side || ''}">${esc(label)}</span>
+      </div>
+      <div class="row"><span>Xúc xắc</span><span>${diceHtml}</span></div>
+      ${it.point!=null ? `<div class="row"><span>Điểm</span><b>${esc(it.point)}</b></div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+function esc(s){
+  return String(s).replace(/[&<>"']/g,c=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+/* ============================================================
+   AUTO + EVENTS
+   ============================================================ */
+function toggleAuto(){
+  if(autoTimer){
+    clearInterval(autoTimer); autoTimer=null;
+    btnAuto.textContent='▶ Auto 10s';
+    btnAuto.classList.add('ghost');
+  }else{
+    autoTimer=setInterval(load, CONFIG.AUTO_MS);
+    btnAuto.textContent='⏸ Dừng auto';
+    btnAuto.classList.remove('ghost');
+    load();
+  }
+}
+
+btnLoad.addEventListener('click', load);
+btnAuto.addEventListener('click', toggleAuto);
+btnDemo.addEventListener('click', ()=>{
+  $banner.style.display='block';
+  $raw.textContent = JSON.stringify(DEMO, null, 2);
+  render(DEMO, true);
+  $status.innerHTML = '<span class="warn-txt">🧪 Đang xem DEMO</span>';
+});
+
+/* chạy lần đầu */
+load();
+</script>
+</body>
+</html>
